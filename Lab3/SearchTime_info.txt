@@ -1,0 +1,3 @@
+Train Duration (TD):
+	1 -> 30d_mem	2 -> 30d+    4 -> 5d
+	5 -> 1d

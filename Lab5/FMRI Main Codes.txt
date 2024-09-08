@@ -1,0 +1,83 @@
+********** Part 1 **********
+a)
+3dSkullStrip -input sub-05_T1w.nii -prefix SkullStrip_output.nii
+
+b)
+3dinfo SkullStrip_output.nii
+
+c)
+3dcalc -a SkullStrip_output.nii -expr 'within(a,1500,2500)' -prefix GrayMask_output.nii
+
+
+
+********** Part 2 **********
+a)
+slice time correction: 		3dinfo AVO_25_M21_062811_Vis01_170r.nii
+				3dTshift -tpattern @slice_times.txt -prefix FT_run1_tshift AVO_25_M21_062811_Vis01_170r.nii
+
+motion correction:		3dvolreg -verbose -zpad 1 -base FT_run1_tshift+orig[2] \
+				-1Dfile dfile.FT1.1D -prefix FT_run1.volreg \
+				-cubic  -1Dmatrix_save mat.FT1.vr.aff12.1D  FT_run1_tshift+orig
+
+normalization: 			3dTstat -mean -prefix meanfunc1.nii.gz FT_run1.volreg+orig
+				3dcalc -a FT_run1.volreg+orig -b meanfunc1.nii.gz -expr '(a-b)/(abs(b)+1)*astep(b,200)*100' -prefix FT_run1.scale
+
+special and temporal filtering:	3dAutomask -clfrac 0.4 -prefix clean_base.nii.gz meanfunc1.nii.gz
+				3dBandpass -input FT_run1.scale+orig -mask clean_base.nii.gz -blur 5 -band 0.01 0.1 -prefix FT_run1.scale.smooth
+
+
+
+********** Part 3 **********
+align_epi_anat.py -anat2epi -anat SkullStrip_output.nii  -anat_has_skull no -suffix _al_junk  -epi clean_base.nii.gz -epi_base 0  -epi_strip 3dAutomask \
+-cost nmi -giant_move -check_flip  -volreg off -tshift off
+
+cat_matvec SkullStrip_output_al_junk_mat.aff12.1D -I > func2mri_warp.1D
+
+3dAllineate -base SkullStrip_output.nii  -input clean_base.nii.gz  -1Dmatrix_apply func2mri_warp.1D  -prefix epimask2anat.nii.gz
+
+3dNwarpApply -nwarp  anatQQ.FT.aff12.1D anatQQ.FT_WARP.nii -source epimask2anat.nii.gz  -master MNI152_2009_template_SSW.nii.gz -dxyz 3 -prefix epimask2mni.nii.gz
+
+3dresample -master epimask2mni.nii.gz -input FT_run1.scale.smooth+orig -prefix FT_run1.scale.smooth.resampled+orig
+
+3dcalc -a FT_run1.scale.smooth.resampled+tlrc -b epimask2mni.nii.gz -expr 'a*b' -prefix FT_run1.scale.smooth.maskd
+
+
+
+********** Part 4 & 5 **********
+3dDeconvolve -input FT_run1.scale.smooth.maskd+tlrc                        \
+    -polort 0                                                            \
+    -num_stimts 3                                                        \
+    -stim_times_FSL 1 standard.txt 'BLOCK(0.2,1)'                      	 \
+    -stim_label 1 standard                                               \
+    -stim_times_FSL 2 oddball.txt 'BLOCK(0.2,1)'                      	 \
+    -stim_label 2 oddball                                                \
+    -stim_times_FSL 3 response.txt 'dmBLOCK(1)' 			 \
+    -stim_label 3 response 						 \
+    -jobs 2                                                              \
+    -gltsym 'SYM: oddball -standard'                                     \
+    -glt_label 1 oddball-standard                                        \
+    -gltsym 'SYM: 0.5*oddball +0.5*standard +0.5*response'               \
+    -glt_label 2 mean.oddballstandard                                    \
+    -fout -tout -x1D X.xmat.1D -xjpeg X.jpg                              \
+    -errts errts.FT1                                                     \
+    -bucket stats.FT1
+
+
+
+********** Part 6 **********
+3dAllineate -base SkullStrip_output.nii  -input stats.FT1+tlrc  -1Dmatrix_apply func2mri_warp.1D   -prefix stats.FT1.aligned.nii.gz
+
+
+
+********** Part 7 **********
+3dAllineate -base SkullStrip_output.nii  -input errts.FT1+tlrc  -1Dmatrix_apply func2mri_warp.1D   -prefix errts.FT1.aligned.nii.gz
+
+3dresample -master GrayMask_output.nii -input errts.FT1+tlrc'[2..$]' -prefix errts.FT1_resampled2
+
+3dFWHMx -mask GrayMask_output.nii -input errts.FT1_resampled2+orig -acf >> acf_parameters.txt
+
+3dClustSim -mask GrayMask_output.nii -acf 0.331835  3.39421  5.94047 -NN 1 -pthr 0.01 0.05 -prefix clustsim_output
+
+
+
+
